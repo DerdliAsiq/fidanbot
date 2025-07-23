@@ -5,7 +5,7 @@ import pytz
 import re
 import tempfile
 import asyncio
-from dotenv import load_dotenv
+#from dotenv import load_dotenv  # Kaldırıldı
 from telegram import Update, ChatAdministratorRights
 from telegram.ext import (
     ApplicationBuilder, CommandHandler,
@@ -14,10 +14,9 @@ from telegram.ext import (
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import yt_dlp
 
-# Yükləmə
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-AUTHORIZED_ADMINS = [int(i) for i in os.getenv("AUTHORIZED_ADMINS").split()]
+# load_dotenv()  # Kaldırıldı
+BOT_TOKEN = "8124444810:AAG_805OuJhBdS8qHI5RQXSexGzD-EQ2a_E"  # Direkt token buraya yazıldı
+AUTHORIZED_ADMINS = [6090879334, 6409436167]  # Direkt admin ID listesi buraya yazıldı
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
