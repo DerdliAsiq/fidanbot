@@ -1,219 +1,156 @@
-import os
+import asyncio
 import logging
 import datetime
-import pytz
-import re
-import tempfile
-import asyncio
-#from dotenv import load_dotenv  # Kaldırıldı
-from telegram import Update, ChatAdministratorRights
+from telegram import Bot, Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler,
-    ContextTypes, CallbackContext
+    Application,
+    CommandHandler,
+    ContextTypes,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import yt_dlp
+from apscheduler.triggers.cron import CronTrigger
 
-# load_dotenv()  # Kaldırıldı
-BOT_TOKEN = "8124444810:AAG_805OuJhBdS8qHI5RQXSexGzD-EQ2a_E"  # Direkt token buraya yazıldı
-AUTHORIZED_ADMINS = [6090879334, 6409436167]  # Direkt admin ID listesi buraya yazıldı
+# Telegram bot token
+BOT_TOKEN = "8124444810:AAG_805OuJhBdS8qHI5RQXSexGzD-EQ2a_E"
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Yetkili admin kullanıcı ID'leri
+AUTHORIZED_ADMINS = [6090879334, 6409436167]
 
-BAKU = pytz.timezone("Asia/Baku")
+# Telegram kanal ID’si (güncelleyebilirsin)
+CHANNEL_ID = "@LoFiLyfe_Music"
 
-def is_authorized(user_id: int) -> bool:
-    return user_id in AUTHORIZED_ADMINS
+# Günlük selamlar
+GREETINGS = {
+    "morning": "🌅 Sabahınız xeyir, dostlar! Yeni günə pozitiv başlayın!",
+    "afternoon": "🌞 Günortanız xeyir! Enerjinizi yüksək tutun!",
+    "evening": "🌇 Axşamınız xeyir! Gün necə keçdi?",
+    "night": "🌙 Gecəniz xeyrə qalsın, yuxularınız şirin olsun!"
+}
 
-def normalize_chat_id(chat_str):
-    if re.match(r"^-?\d+$", chat_str):
-        return int(chat_str)
-    return chat_str
+# Günlük selam mesajını gönderme işlevi
+async def send_greeting(context: ContextTypes.DEFAULT_TYPE, time_of_day: str):
+    if time_of_day in GREETINGS:
+        message = GREETINGS[time_of_day]
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salam! Mən kanal idarəetmə botuyam 🎵")
+# Manuel selamlama komutu
+async def greet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in AUTHORIZED_ADMINS:
+        await update.message.reply_text("❌ Bu əmri işlətmək üçün icazəniz yoxdur.")
+        return
 
+    if not context.args:
+        await update.message.reply_text("İstifadə: /greet_morning | /greet_afternoon | /greet_evening | /greet_night")
+        return
+
+    command = update.message.text.lower()
+    for key in GREETINGS:
+        if key in command:
+            await context.bot.send_message(chat_id=CHANNEL_ID, text=GREETINGS[key])
+            await update.message.reply_text(f"✅ {key} mesajı göndərildi.")
+            return
+
+    await update.message.reply_text("❌ Doğru bir zaman belirleyin: morning, afternoon, evening, night.")
+
+# Yetkilendirme kontrolü gerektiren komut dekoratörü
+def admin_required(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        if user_id not in AUTHORIZED_ADMINS:
+            await update.message.reply_text("❌ Bu əmri işlətmək üçün icazəniz yoxdur.")
+            return
+        return await func(update, context)
+    return wrapper
+
+# Admin: Kullanıcı at
+@admin_required
 async def kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("Sənin səlahiyyətin yoxdur.")
+    if not context.args:
+        await update.message.reply_text("❗ İstifadə: /kick <istifadəçi_id>")
         return
-    if len(context.args) < 2:
-        await update.message.reply_text("İstifadə: /kick @kanal @istifadəçi")
-        return
-
-    kanal_raw = context.args[0]
-    user_raw = context.args[1]
-
-    chat_id = normalize_chat_id(kanal_raw)
-    username = user_raw.replace("@", "")
-
     try:
-        user = await context.bot.get_chat_member(chat_id, username)
-        await context.bot.ban_chat_member(chat_id, user.user.id)
-        await update.message.reply_text(f"{user_raw} kanaldan çıxarıldı.")
+        user_id = int(context.args[0])
+        await context.bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        await update.message.reply_text(f"✅ {user_id} atıldı.")
     except Exception as e:
-        await update.message.reply_text(f"Xəta baş verdi: {e}")
+        await update.message.reply_text(f"❌ Hata: {e}")
 
+# Admin: Kanal adı dəyiş
+@admin_required
+async def change_channel_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("❗ İstifadə: /set_title <yeni_ad>")
+        return
+    new_title = " ".join(context.args)
+    try:
+        await context.bot.set_chat_title(chat_id=CHANNEL_ID, title=new_title)
+        await update.message.reply_text(f"✅ Kanal adı dəyişdirildi: {new_title}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Hata: {e}")
+
+# Admin: Başqa adminə icazə ver
+@admin_required
 async def promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("Sənin səlahiyyətin yoxdur.")
+    if not context.args:
+        await update.message.reply_text("❗ İstifadə: /promote <istifadəçi_id>")
         return
-    if len(context.args) < 2:
-        await update.message.reply_text("İstifadə: /promote @kanal @istifadəçi")
-        return
-
-    kanal_raw = context.args[0]
-    user_raw = context.args[1]
-
-    chat_id = normalize_chat_id(kanal_raw)
-    username = user_raw.replace("@", "")
-
     try:
-        user = await context.bot.get_chat_member(chat_id, username)
+        user_id = int(context.args[0])
         await context.bot.promote_chat_member(
-            chat_id=chat_id,
-            user_id=user.user.id,
-            privileges=ChatAdministratorRights(
-                is_anonymous=False,
-                can_manage_chat=True,
-                can_post_messages=True,
-                can_edit_messages=True,
-                can_delete_messages=True,
-                can_manage_video_chats=True,
-                can_invite_users=True,
-                can_change_info=True,
-                can_pin_messages=True
-            )
+            chat_id=CHANNEL_ID,
+            user_id=user_id,
+            can_manage_chat=True,
+            can_post_messages=True,
+            can_edit_messages=True,
+            can_delete_messages=True,
         )
-        await update.message.reply_text(f"{user_raw} admin edildi.")
+        await update.message.reply_text(f"✅ {user_id} admin olaraq təyin edildi.")
     except Exception as e:
-        await update.message.reply_text(f"Xəta baş verdi: {e}")
+        await update.message.reply_text(f"❌ Hata: {e}")
 
-async def rename(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("Sənin səlahiyyətin yoxdur.")
-        return
-    if len(context.args) < 2:
-        await update.message.reply_text("İstifadə: /rename @kanal Yeni Kanal Adı")
-        return
-
-    kanal_raw = context.args[0]
-    yeni_ad = " ".join(context.args[1:])
-
-    chat_id = normalize_chat_id(kanal_raw)
-
-    try:
-        await context.bot.set_chat_title(chat_id=chat_id, title=yeni_ad)
-        await update.message.reply_text(f"{kanal_raw} kanalının adı dəyişdirildi: {yeni_ad}")
-    except Exception as e:
-        await update.message.reply_text(f"Xəta baş verdi: {e}")
-
-async def mesaj(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("Sənin səlahiyyətin yoxdur.")
-        return
-    if len(context.args) < 2:
-        await update.message.reply_text("İstifadə: /mesaj @kanal İstədiyiniz mesaj")
-        return
-
-    kanal_raw = context.args[0]
-    chat_id = normalize_chat_id(kanal_raw)
-    mesaj_text = " ".join(context.args[1:])
-
-    try:
-        await context.bot.send_message(chat_id=chat_id, text=mesaj_text)
-        await update.message.reply_text(f"Mesaj göndərildi: {mesaj_text}")
-    except Exception as e:
-        await update.message.reply_text(f"Xəta baş verdi: {e}")
-
-async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("Sənin səlahiyyətin yoxdur.")
-        return
-    if len(context.args) < 1:
-        await update.message.reply_text("İstifadə: /video <YouTube və ya TikTok linki>")
-        return
-
-    url = context.args[0]
-
-    msg = await update.message.reply_text("Video yüklənir, zəhmət olmasa gözləyin...")
-
-    ydl_opts = {
-        'format': 'mp4[height<=480]+bestaudio/best[ext=mp4]/best',
-        'outtmpl': tempfile.gettempdir() + '/%(id)s.%(ext)s',
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'merge_output_format': 'mp4',
-    }
-
-    loop = asyncio.get_event_loop()
-
-    try:
-        def download_video():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                return ydl.prepare_filename(info)
-
-        file_path = await loop.run_in_executor(None, download_video)
-
-        await msg.edit_text("Video yükləndi, göndərilir...")
-
-        with open(file_path, 'rb') as video_file:
-            await context.bot.send_video(chat_id=update.effective_chat.id, video=video_file)
-
-        await msg.delete()
-
-        # İstersen dosya silme işlemi ekleyebilirsin:
-        # os.remove(file_path)
-
-    except Exception as e:
-        await msg.edit_text(f"Video yüklənərkən xəta baş verdi: {e}")
-
-async def send_greeting(context: CallbackContext):
-    hour = datetime.datetime.now(BAKU).hour
-    text = None
-    if hour == 8:
-        text = "🌅 Səhəriniz xeyir! ☀️"
-    elif hour == 13:
-        text = "Günortanız xeyir!"
-    elif hour == 18:
-        text = "🌇 Axşamınız xeyir!"
-    elif hour == 23:
-        text = "🌙 Gecəniz xeyrə qalsın!"
-    else:
-        return
-
-    channel_list = [
-        "@LoFiLyfe_Music",
-    ]
-
-    for ch in channel_list:
-        try:
-            await context.bot.send_message(chat_id=ch, text=text)
-        except Exception as e:
-            logging.error(f"Salam mesajı göndərilərkən xəta: {e}")
+def setup_jobs(scheduler: AsyncIOScheduler, app: Application):
+    scheduler.add_job(
+        send_greeting,
+        CronTrigger(hour=8, minute=0, timezone="Asia/Baku"),
+        args=[app.bot, "morning"],
+    )
+    scheduler.add_job(
+        send_greeting,
+        CronTrigger(hour=13, minute=0, timezone="Asia/Baku"),
+        args=[app.bot, "afternoon"],
+    )
+    scheduler.add_job(
+        send_greeting,
+        CronTrigger(hour=18, minute=0, timezone="Asia/Baku"),
+        args=[app.bot, "evening"],
+    )
+    scheduler.add_job(
+        send_greeting,
+        CronTrigger(hour=22, minute=0, timezone="Asia/Baku"),
+        args=[app.bot, "night"],
+    )
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    logging.basicConfig(level=logging.INFO)
+    scheduler = AsyncIOScheduler()
 
-    scheduler = AsyncIOScheduler(timezone=BAKU)
-    for h in [8, 13, 18, 23]:
-        scheduler.add_job(send_greeting, 'cron', hour=h, minute=0, args=[app.job_queue])
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    # Komutlar
+    app.add_handler(CommandHandler("greet", greet_command))
+    app.add_handler(CommandHandler("kick", kick))
+    app.add_handler(CommandHandler("set_title", change_channel_name))
+    app.add_handler(CommandHandler("promote", promote))
+
+    setup_jobs(scheduler, app)
+
+    # Scheduler'ı başlat
     scheduler.start()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("kick", kick))
-    app.add_handler(CommandHandler("promote", promote))
-    app.add_handler(CommandHandler("rename", rename))
-    app.add_handler(CommandHandler("mesaj", mesaj))
-    app.add_handler(CommandHandler("video", video))
-
-    print("Bot işə düşdü...")
+    # Botu çalıştır
+    print("Bot başladı...")
     app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
