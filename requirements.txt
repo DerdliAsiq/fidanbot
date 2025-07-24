@@ -1,9 +1,4 @@
-pytz
-yt-dlp
-python-telegram-bot==20.7
-pytz
-python-dotenv
-apscheduler
-pytube
-requests
-moviepy
+python-telegram-bot==20.6
+yt-dlp==2024.03.10
+pytz==2024.1
+apscheduler==3.10.4
