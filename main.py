@@ -1,130 +1,151 @@
-import os
+# bot.py
+
 import logging
-import datetime
-import asyncio
+import os
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ChatActions
+from aiogram.utils import executor
+from aiogram.dispatcher.filters import Command
 from pytube import YouTube
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    filters, ContextTypes
-)
-from apscheduler.schedulers.background import BackgroundScheduler
+from pydub import AudioSegment
+import asyncio
+import datetime
 
-# Bot tokeni ve admin ID'leri doğrudan burada tanımlanıyor
+# === AYARLAR ===
 BOT_TOKEN = "8124444810:AAG_805OuJhBdS8qHI5RQXSexGzD-EQ2a_E"
-AUTHORIZED_ADMINS = ["6090879334", "6409436167"]
+AUTHORIZED_ADMINS = [6090879334, 6409436167]  # Telegram ID'ler
 
-# Mesajların gönderileceği kanal ID'si
-CHANNEL_ID = "@LoFiLyfe_MF"
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
-# Loglama ayarları
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
+CHANNEL_ID = -1002848039271  # LoFiLyfe_MF kanalı
 
-# Selam mesajları gönderme fonksiyonu
-async def greet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))  # GMT+4 (Asia/Baku)
-    hour = now.hour
+# === SELAMLAMA SAATLERİ ===
+GREETINGS = {
+    "morning": (8, "🌄 Sabahınız xeyir! Yeni gün sizə bol enerji və uğur gətirsin!"),
+    "afternoon": (13, "🌞 Günortanız xeyir! Gününüz məhsuldar keçsin!"),
+    "evening": (18, "🌇 Axşamınız xeyir! Günün yorğunluğu geridə qalsın!"),
+    "night": (23, "🌙 Gecəniz xeyrə qalsın! Rahat istirahətlər!")
+}
 
-    if 6 <= hour < 12:
-        message = "🌅 Səhəriniz xeyir!"
-    elif 12 <= hour < 17:
-        message = "☀️ Günortanız xeyir!"
-    elif 17 <= hour < 21:
-        message = "🌇 Axşamınız xeyir!"
-    else:
-        message = "🌙 Gecəniz xeyrə qalsın!"
+# === SELAMLAMA SCHEDULE ===
+async def scheduled_greetings():
+    while True:
+        now = datetime.datetime.now()
+        for key, (hour, message) in GREETINGS.items():
+            if now.hour == hour and now.minute == 0:
+                await bot.send_message(CHANNEL_ID, message)
+        await asyncio.sleep(60)
 
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
-
-
-def schedule_greetings(app):
-    scheduler = BackgroundScheduler(timezone="Asia/Baku")
-    # Sabah, günortası, axşam, gece saatlerinde çalışacak
-    scheduler.add_job(lambda: asyncio.run(greet_channel(app)), "cron", hour="8,14,20,23")
-    scheduler.start()
-
-
-async def greet_channel(app):
-    async with app:
-        await app.bot.send_message(chat_id=CHANNEL_ID, text="(Avtomatik salam göndərildi)")
-        await greet(None, app)
-
-
-# /start komutu
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot aktivdir. Komutları istifadə edə bilərsiniz.")
-
-
-# /mesaj komutu - sadece adminler kullanabilir
-async def mesaj(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    if user_id not in AUTHORIZED_ADMINS:
-        await update.message.reply_text("Bu əmri istifadə etmək səlahiyyətiniz yoxdur.")
+# === KOMUT: /video ===
+@dp.message_handler(Command("video"))
+async def video_handler(message: types.Message):
+    url = message.get_args()
+    if not url.startswith("http"):
+        await message.reply("❌ Xəta baş verdi. Linki yoxlayın.")
         return
-
-    text = " ".join(context.args)
-    if not text:
-        await update.message.reply_text("Zəhmət olmasa göndərmək istədiyiniz mesajı yazın.")
-        return
-
     try:
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=text)
-        await update.message.reply_text("Mesaj uğurla kanala göndərildi.")
-    except Exception as e:
-        logger.error(f"Mesaj göndərilərkən xəta baş verdi: {e}")
-        await update.message.reply_text("Xəta baş verdi.")
-
-
-# /video komutu - youtube linki alır, videoyu indirip gönderir
-async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Zəhmət olmasa YouTube video linki əlavə edin.")
-        return
-
-    url = context.args[0]
-
-    try:
+        await message.reply("⏳ Video endirilir, zəhmət olmasa gözləyin...")
         yt = YouTube(url)
-        stream = yt.streams.filter(progressive=True, file_extension='mp4').get_lowest_resolution()
-        filename = stream.download(filename="video.mp4")
-
-        if os.path.getsize(filename) > 50 * 1024 * 1024:
-            await update.message.reply_text("⚠️ Video faylı çox böyükdür (maks. 50 MB).")
-            os.remove(filename)
-            return
-
-        with open(filename, 'rb') as video_file:
-            await context.bot.send_video(chat_id=update.effective_chat.id, video=video_file)
-
-        os.remove(filename)
-
+        stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+        file_path = stream.download(filename="video.mp4")
+        await bot.send_chat_action(message.from_user.id, ChatActions.UPLOAD_VIDEO)
+        await bot.send_video(chat_id=message.from_user.id, video=open(file_path, 'rb'), caption=yt.title)
+        os.remove(file_path)
     except Exception as e:
-        logger.error(f"Video yükləmə xətası: {e}")
-        await update.message.reply_text("Xəta baş verdi. Linki və ya videonu yoxlayın.")
+        logging.exception(e)
+        await message.reply("❌ Video yüklənərkən xəta baş verdi.")
 
+# === KOMUT: /mp3 ===
+@dp.message_handler(Command("mp3"))
+async def mp3_handler(message: types.Message):
+    url = message.get_args()
+    if not url.startswith("http"):
+        await message.reply("❌ Xəta baş verdi. Linki yoxlayın.")
+        return
+    try:
+        await message.reply("🎵 MP3 hazırlanır, bir az gözləyin...")
+        yt = YouTube(url)
+        stream = yt.streams.filter(only_audio=True).first()
+        out_file = stream.download(filename="temp_audio.mp4")
+        mp3_file = "audio.mp3"
+        AudioSegment.from_file(out_file).export(mp3_file, format="mp3")
+        await bot.send_chat_action(message.from_user.id, ChatActions.UPLOAD_AUDIO)
+        await bot.send_audio(chat_id=message.from_user.id, audio=open(mp3_file, 'rb'), title=yt.title)
+        os.remove(out_file)
+        os.remove(mp3_file)
+    except Exception as e:
+        logging.exception(e)
+        await message.reply("❌ MP3 yüklənərkən xəta baş verdi.")
 
-# Bilinmeyen komutlarda cevap
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Belə bir əmr mövcud deyil. Zəhmət olmasa doğru komutu istifadə edin.")
+# === KOMUT: /kick ===
+@dp.message_handler(Command("kick"))
+async def kick_handler(message: types.Message):
+    if message.from_user.id not in AUTHORIZED_ADMINS:
+        await message.reply("❌ İcazəniz yoxdur.")
+        return
+    if not message.reply_to_message:
+        await message.reply("Lütfən atılacaq istifadəçiyə cavab verin.")
+        return
+    try:
+        await bot.kick_chat_member(chat_id=CHANNEL_ID, user_id=message.reply_to_message.from_user.id)
+        await message.reply("✅ İstifadəçi atıldı.")
+    except Exception as e:
+        logging.exception(e)
+        await message.reply("❌ İstifadəçi atıla bilmədi.")
 
+# === KOMUT: /promote ===
+@dp.message_handler(Command("promote"))
+async def promote_handler(message: types.Message):
+    if message.from_user.id not in AUTHORIZED_ADMINS:
+        await message.reply("❌ İcazəniz yoxdur.")
+        return
+    if not message.reply_to_message:
+        await message.reply("Lütfən yüksəldiləcək istifadəçiyə cavab verin.")
+        return
+    try:
+        await bot.promote_chat_member(
+            chat_id=CHANNEL_ID,
+            user_id=message.reply_to_message.from_user.id,
+            can_manage_chat=True,
+            can_change_info=True,
+            can_post_messages=True,
+            can_edit_messages=True,
+            can_invite_users=True,
+            can_delete_messages=True
+        )
+        await message.reply("✅ İstifadəçi admin edildi.")
+    except Exception as e:
+        logging.exception(e)
+        await message.reply("❌ İstifadəçi admin edilə bilmədi.")
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+# === KOMUT: /mesaj ===
+@dp.message_handler(Command("mesaj"))
+async def mesaj_handler(message: types.Message):
+    if message.from_user.id not in AUTHORIZED_ADMINS:
+        await message.reply("❌ İcazəniz yoxdur.")
+        return
+    text = message.get_args()
+    if not text:
+        await message.reply("Mesaj yazılmayıb.")
+        return
+    try:
+        await bot.send_message(chat_id=CHANNEL_ID, text=text)
+        await message.reply("✅ Mesaj göndərildi.")
+    except Exception as e:
+        logging.exception(e)
+        await message.reply("❌ Mesaj göndərilə bilmədi.")
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("mesaj", mesaj))
-    app.add_handler(CommandHandler("video", video))
-    app.add_handler(MessageHandler(filters.COMMAND, unknown))
+# === HATALI KOMUTLAR ===
+@dp.message_handler()
+async def unknown_command(message: types.Message):
+    if message.text.startswith("/"):
+        await message.reply("❓ Tanınmayan komut.")
 
-    schedule_greetings(app)
-
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+# === BOTU BAŞLAT ===
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    loop.create_task(scheduled_greetings())
+    executor.start_polling(dp, skip_updates=True)
