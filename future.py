@@ -1,32 +1,29 @@
-import logging
 import aiohttp
+import asyncio
+import json
 
-GEMINI_API_KEY = "AIzaSyAqhaNjM0TI2h-7-ZoTlhM_KHJz-j09QAo"  # Aynı anahtarı buraya da ekledim
+API_KEY = "AIzaSyAqhaNjM0TI2h-7-ZoTlhM_KHJz-j09QAo"  # Geminin API anahtarı (örnek)
 
-logger = logging.getLogger(__name__)
+async def chat_with_gemini(message: str) -> str:
+    # Örnek Gemini sohbet API isteği, kendi API dokümantasyonuna göre düzenle
+    url = "https://geminiapi.example.com/v1/chat"
 
-async def query_gemini_api(message_text: str) -> str:
-    """
-    Gemini API ile sohbet sorgusu yapar.
-    Gerçek endpoint ve payload Gemini dokümanına göre ayarlanmalı.
-    """
-    url = "https://gemini.api.endpoint/chat"  # Burayı gerçek Gemini API endpoint ile değiştir
     headers = {
-        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "message": message_text
+        "model": "gemini-chat",
+        "messages": [
+            {"role": "user", "content": message}
+        ]
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("response", "Cavab alınmadı.")
-                else:
-                    return f"Xəta: API status kodu {resp.status}"
-    except Exception as e:
-        logger.error(f"Gemini API xətası: {e}")
-        return "Xəta baş verdi, sonra yenidən cəhd edin."
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                # Gelen cevabı kendi API dökümantasyonuna göre ayarla:
+                return data.get("reply", "Cavab alınamadı.")
+            else:
+                return f"Xəta: API status {resp.status}"
