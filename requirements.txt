@@ -2,3 +2,4 @@ python-telegram-bot==20.6
 yt-dlp==2024.03.10
 pytz==2024.1
 apscheduler==3.10.4
+aiogram==3.0.0b7
