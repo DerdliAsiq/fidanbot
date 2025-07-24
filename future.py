@@ -1,29 +1,48 @@
 import aiohttp
 import asyncio
-import json
 
-API_KEY = "AIzaSyAqhaNjM0TI2h-7-ZoTlhM_KHJz-j09QAo"  # Geminin API anahtarı (örnek)
+# GOOGLE GEMINI API KEY (kendi anahtarını buraya koy)
+API_KEY = "AIzaSyAqhaNjM0TI2h-7-ZoTlhM_KHJz-j09QAo"
 
-async def chat_with_gemini(message: str) -> str:
-    # Örnek Gemini sohbet API isteği, kendi API dokümantasyonuna göre düzenle
-    url = "https://geminiapi.example.com/v1/chat"
+# Gemini API endpoint URL'si (örnek, gerçek endpoint Google belgelerinden kontrol edilmeli)
+GEMINI_API_URL = "https://gemini.googleapis.com/v1/chat:sendMessage"
+
+async def sohbet_response(user_text: str) -> str:
+    """
+    Kullanıcının yazdığı metni Google Gemini API'ye gönderir, yanıtı döner.
+    """
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "model": "gemini-chat",
+
+    json_data = {
+        "model": "gemini-2.0-flash",  # Örnek model adı, gerçek dokümana göre değiştir
         "messages": [
-            {"role": "user", "content": message}
-        ]
+            {
+                "role": "user",
+                "content": user_text
+            }
+        ],
+        "temperature": 0.7
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status == 200:
+        try:
+            async with session.post(GEMINI_API_URL, headers=headers, json=json_data) as resp:
+                if resp.status != 200:
+                    return f"API xətası: Status kodu {resp.status}"
+
                 data = await resp.json()
-                # Gelen cevabı kendi API dökümantasyonuna göre ayarla:
-                return data.get("reply", "Cavab alınamadı.")
-            else:
-                return f"Xəta: API status {resp.status}"
+
+                # Burada dönüş yapısı Gemini API'ye göre değişir,
+                # Örnek varsayalım ki "choices" listesinde "message" objesi var
+                message = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if not message:
+                    return "Cavab alınmadı."
+
+                return message
+
+        except Exception as e:
+            return f"Xəta baş verdi: {e}"
