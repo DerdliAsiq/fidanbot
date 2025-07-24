@@ -5,3 +5,5 @@ pytz
 python-dotenv
 apscheduler
 pytube
+requests
+moviepy
